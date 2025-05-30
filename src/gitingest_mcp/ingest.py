@@ -173,8 +173,8 @@ class GitIngester:
 			return self.content
 		return self._get_files_content(file_paths)
 
-	def _get_files_content(self, file_paths: List[str]) -> str:
-		"""Helper function to extract specific files from repository content."""
+	async def _get_files_content_async(self, file_paths: List[str]) -> str:
+		"""Async helper function to extract specific files from repository content."""
 		result = {}
 		for path in file_paths:
 			result[path] = None
@@ -182,7 +182,7 @@ class GitIngester:
 		# If we have tree data from GitHub API, fetch files via API
 		if hasattr(self, '_tree_data') and self.github_token:
 			try:
-				return asyncio.run(self._fetch_files_via_api(file_paths))
+				return await self._fetch_files_via_api(file_paths)
 			except Exception as e:
 				# If API fetch fails, return error message
 				return f"Error fetching files via GitHub API: {str(e)}"
@@ -191,6 +191,26 @@ class GitIngester:
 			return self._format_empty_result(result)
 		# Get the content as a string
 		content_str = str(self.content)
+		
+		return self._get_files_content_sync(file_paths, content_str)
+
+	def _get_files_content(self, file_paths: List[str]) -> str:
+		"""Helper function to extract specific files from repository content (sync version for gitingest content)."""
+		result = {}
+		for path in file_paths:
+			result[path] = None
+		
+		if not self.content:
+			return self._format_empty_result(result)
+		
+		content_str = str(self.content)
+		return self._get_files_content_sync(file_paths, content_str)
+
+	def _get_files_content_sync(self, file_paths: List[str], content_str: str) -> str:
+		"""Synchronous file content extraction from gitingest content."""
+		result = {}
+		for path in file_paths:
+			result[path] = None
 
 		# Try multiple patterns to match file content sections
 		patterns = [

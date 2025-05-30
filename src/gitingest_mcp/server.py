@@ -105,7 +105,13 @@ async def git_files(
 		await ingester.fetch_repo_data()
 		
 		# Get the requested file contents
-		files_content = ingester.get_content(file_paths)
+		if hasattr(ingester, '_tree_data') and ingester.github_token:
+			# For GitHub API fetched repos, use async method
+			files_content = await ingester._get_files_content_async(file_paths)
+		else:
+			# For standard gitingest repos, use sync method
+			files_content = ingester.get_content(file_paths)
+		
 		if not files_content:
 			return {
 				"error": f"None of the requested files were found in the repository"
