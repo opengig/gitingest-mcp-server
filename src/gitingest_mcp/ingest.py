@@ -282,9 +282,15 @@ class GitIngester:
 				
 				for file_path in file_paths:
 					try:
-						# Get file content from GitHub API
+						# First try to find the exact file path in tree data
+						actual_path = self._find_file_in_tree(file_path)
+						if not actual_path:
+							result[file_path] = f"[File not found in repository tree. Available files can be seen with git_tree tool]"
+							continue
+						
+						# Get file content from GitHub API using the actual path
 						response = await client.get(
-							f'https://api.github.com/repos/{self.owner}/{self.repo}/contents/{file_path}',
+							f'https://api.github.com/repos/{self.owner}/{self.repo}/contents/{actual_path}',
 							headers=headers,
 							params={'ref': self.branch} if self.branch else {}
 						)
@@ -303,7 +309,7 @@ class GitIngester:
 							else:
 								result[file_path] = f"[Directory or unsupported file type]"
 						else:
-							result[file_path] = f"[File not found - HTTP {response.status_code}]"
+							result[file_path] = f"[File not found at path '{actual_path}' - HTTP {response.status_code}]"
 					except Exception as e:
 						# If individual file fetch fails, continue with others
 						result[file_path] = f"[Error fetching file: {str(e)}]"
@@ -321,3 +327,35 @@ class GitIngester:
 				
 		except Exception as e:
 			raise Exception(f"Failed to fetch files via GitHub API: {str(e)}")
+
+	def _find_file_in_tree(self, requested_path: str) -> Optional[str]:
+		"""Find the actual file path in the repository tree data."""
+		if not hasattr(self, '_tree_data'):
+			return None
+		
+		# First try exact match
+		for item in self._tree_data:
+			if item['type'] == 'blob' and item['path'] == requested_path:
+				return item['path']
+		
+		# Try filename match (case-sensitive)
+		requested_filename = requested_path.split('/')[-1]
+		for item in self._tree_data:
+			if item['type'] == 'blob':
+				filename = item['path'].split('/')[-1]
+				if filename == requested_filename:
+					return item['path']
+		
+		# Try case-insensitive filename match
+		for item in self._tree_data:
+			if item['type'] == 'blob':
+				filename = item['path'].split('/')[-1]
+				if filename.lower() == requested_filename.lower():
+					return item['path']
+		
+		# Try partial path match (ends with the requested path)
+		for item in self._tree_data:
+			if item['type'] == 'blob' and item['path'].endswith(requested_path):
+				return item['path']
+		
+		return None
