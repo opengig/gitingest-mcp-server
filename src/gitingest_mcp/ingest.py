@@ -181,10 +181,14 @@ class GitIngester:
 		
 		# If we have tree data from GitHub API, fetch files via API
 		if hasattr(self, '_tree_data') and self.github_token:
-			return asyncio.run(self._fetch_files_via_api(file_paths))
+			try:
+				return asyncio.run(self._fetch_files_via_api(file_paths))
+			except Exception as e:
+				# If API fetch fails, return error message
+				return f"Error fetching files via GitHub API: {str(e)}"
 		
 		if not self.content:
-			return result
+			return self._format_empty_result(result)
 		# Get the content as a string
 		content_str = str(self.content)
 
@@ -234,6 +238,15 @@ class GitIngester:
 				concatenated += f"==================================================\nFile: {path}\n==================================================\n{content}"
 		return concatenated
 
+	def _format_empty_result(self, result: Dict[str, Any]) -> str:
+		"""Format empty result when no content is available."""
+		concatenated = ""
+		for path, content in result.items():
+			if concatenated:
+				concatenated += "\n\n"
+			concatenated += f"==================================================\nFile: {path}\n==================================================\nFile not found or no content available"
+		return concatenated
+
 	async def _fetch_files_via_api(self, file_paths: List[str]) -> str:
 		"""Fetch specific files via GitHub API for private repositories."""
 		result = {}
@@ -261,10 +274,19 @@ class GitIngester:
 							if file_data.get('type') == 'file':
 								# Decode base64 content
 								import base64
-								content = base64.b64decode(file_data['content']).decode('utf-8')
-								result[file_path] = content
-					except Exception:
+								try:
+									content = base64.b64decode(file_data['content']).decode('utf-8')
+									result[file_path] = content
+								except UnicodeDecodeError:
+									# Handle binary files
+									result[file_path] = f"[Binary file - cannot display content]"
+							else:
+								result[file_path] = f"[Directory or unsupported file type]"
+						else:
+							result[file_path] = f"[File not found - HTTP {response.status_code}]"
+					except Exception as e:
 						# If individual file fetch fails, continue with others
+						result[file_path] = f"[Error fetching file: {str(e)}]"
 						continue
 				
 				# Concatenate all found file contents with file headers
