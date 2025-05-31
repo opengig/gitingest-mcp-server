@@ -14,7 +14,6 @@ class GitIngester:
         self.github_token: Optional[str] = os.getenv("GITHUB_TOKEN")
         self.is_private_repo: bool = False
 
-        # Extract owner and repo from URL for API access
         self.owner: Optional[str] = None
         self.repo: Optional[str] = None
         self._parse_github_url(url)
@@ -123,9 +122,7 @@ class GitIngester:
                     not any(part.startswith(".") for part in path_parts)
                     and "components/ui" not in item["path"]
                 ):
-                    indent = "  " * (len(path_parts) - 1)
-                    filename = path_parts[-1]
-                    tree_lines.append(f"{indent}{filename}")
+                    tree_lines.append(item["path"])
         return "\n".join(tree_lines)
 
     def _parse_summary(self, summary_str: str) -> Dict[str, Any]:
@@ -139,14 +136,12 @@ class GitIngester:
             else:
                 summary_dict["repository"] = ""
 
-            # Extract files analyzed
             files_match = re.search(r"Files analyzed: (\d+)", summary_str)
             if files_match:
                 summary_dict["num_files"] = int(files_match.group(1))
             else:
                 summary_dict["num_files"] = None
 
-            # Extract estimated tokens
             tokens_match = re.search(r"Estimated tokens: (.+)", summary_str)
             if tokens_match:
                 summary_dict["token_count"] = tokens_match.group(1).strip()
@@ -154,12 +149,10 @@ class GitIngester:
                 summary_dict["token_count"] = ""
 
         except Exception:
-            # If any regex operation fails, set default values
             summary_dict["repository"] = ""
             summary_dict["num_files"] = None
             summary_dict["token_count"] = ""
 
-        # Store the original string as well
         summary_dict["raw"] = summary_str
         return summary_dict
 
@@ -183,17 +176,14 @@ class GitIngester:
         for path in file_paths:
             result[path] = None
 
-        # If we have tree data from GitHub API, fetch files via API
         if hasattr(self, "_tree_data") and self.github_token:
             try:
                 return await self._fetch_files_via_api(file_paths)
             except Exception as e:
-                # If API fetch fails, return error message
                 return f"Error fetching files via GitHub API: {str(e)}"
 
         if not self.content:
             return self._format_empty_result(result)
-        # Get the content as a string
         content_str = str(self.content)
 
         return self._get_files_content_sync(file_paths, content_str)
@@ -216,26 +206,19 @@ class GitIngester:
         for path in file_paths:
             result[path] = None
 
-        # Try multiple patterns to match file content sections
         patterns = [
-            # Standard pattern with exactly 50 equals signs
             r"={50}\nFile: ([^\n]+)\n={50}",
-            # More flexible pattern with varying number of equals signs
             r"={10,}\nFile: ([^\n]+)\n={10,}",
-            # Extra flexible pattern
             r"=+\s*File:\s*([^\n]+)\s*\n=+",
         ]
 
         for pattern in patterns:
-            # Find all matches in the content
             matches = re.finditer(pattern, content_str)
             matched = False
             for match in matches:
                 matched = True
-                # Get the position of the match
                 start_pos = match.end()
                 filename = match.group(1).strip()
-                # Find the next file header or end of string
                 next_match = re.search(pattern, content_str[start_pos:])
                 if next_match:
                     end_pos = start_pos + next_match.start()
@@ -243,21 +226,21 @@ class GitIngester:
                 else:
                     file_content = content_str[start_pos:].strip()
 
-                # Check if this file matches any of the requested paths
                 for path in file_paths:
-                    basename = path.split("/")[-1]
-                    if (
-                        path == filename
-                        or basename == filename
-                        or path.endswith("/" + filename)
-                    ):
+                    # Simple and direct matching approach
+                    # 1. Exact match first (most common case)
+                    if path == filename:
+                        result[path] = file_content
+                    # 2. Check if the found file path ends with the requested path
+                    elif filename.endswith("/" + path):
+                        result[path] = file_content
+                    # 3. Fallback to filename matching for edge cases
+                    elif path.split("/")[-1] == filename.split("/")[-1]:
                         result[path] = file_content
 
-            # If we found matches with this pattern, no need to try others
             if matched:
                 break
 
-        # Concatenate all found file contents with file headers
         concatenated = ""
         for path, content in result.items():
             if content is not None:
@@ -290,7 +273,6 @@ class GitIngester:
 
                 for file_path in file_paths:
                     try:
-                        # First try to find the exact file path in tree data
                         actual_path = self._find_file_in_tree(file_path)
                         if not actual_path:
                             result[file_path] = (
@@ -298,7 +280,6 @@ class GitIngester:
                             )
                             continue
 
-                        # Get file content from GitHub API using the actual path
                         response = await client.get(
                             f"https://api.github.com/repos/{self.owner}/{self.repo}/contents/{actual_path}",
                             headers=headers,
@@ -308,7 +289,6 @@ class GitIngester:
                         if response.status_code == 200:
                             file_data = response.json()
                             if file_data.get("type") == "file":
-                                # Decode base64 content
                                 import base64
 
                                 try:
@@ -317,7 +297,6 @@ class GitIngester:
                                     ).decode("utf-8")
                                     result[file_path] = content
                                 except UnicodeDecodeError:
-                                    # Handle binary files
                                     result[file_path] = (
                                         f"[Binary file - cannot display content]"
                                     )
@@ -330,11 +309,9 @@ class GitIngester:
                                 f"[File not found at path '{actual_path}' - HTTP {response.status_code}]"
                             )
                     except Exception as e:
-                        # If individual file fetch fails, continue with others
                         result[file_path] = f"[Error fetching file: {str(e)}]"
                         continue
 
-                # Concatenate all found file contents with file headers
                 concatenated = ""
                 for path, content in result.items():
                     if content is not None:
@@ -352,12 +329,10 @@ class GitIngester:
         if not hasattr(self, "_tree_data"):
             return None
 
-        # First try exact match
         for item in self._tree_data:
             if item["type"] == "blob" and item["path"] == requested_path:
                 return item["path"]
 
-        # Try filename match (case-sensitive)
         requested_filename = requested_path.split("/")[-1]
         for item in self._tree_data:
             if item["type"] == "blob":
@@ -365,14 +340,12 @@ class GitIngester:
                 if filename == requested_filename:
                     return item["path"]
 
-        # Try case-insensitive filename match
         for item in self._tree_data:
             if item["type"] == "blob":
                 filename = item["path"].split("/")[-1]
                 if filename.lower() == requested_filename.lower():
                     return item["path"]
 
-        # Try partial path match (ends with the requested path)
         for item in self._tree_data:
             if item["type"] == "blob" and item["path"].endswith(requested_path):
                 return item["path"]

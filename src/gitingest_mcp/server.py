@@ -68,12 +68,13 @@ async def git_tree(
             "error": f"Failed to get repository tree: {str(e)}. Try https://gitingest.com/{url} instead"
         }
 
+
 @mcp.tool()
 async def git_files(
-	owner: str,
-	repo: str, 
-	file_paths: List[str],
-	branch: Optional[str] = None
+    owner: str,
+    repo: str,
+    file_paths: str,
+    branch: Optional[str] = None,
 ) -> Union[str, Dict[str, str]]:
     """
     Get the content of specific files from a GitHub repository
@@ -81,21 +82,40 @@ async def git_files(
     Args:
             owner: The GitHub organization or username
             repo: The repository name
-            file_paths: List of paths to files within the repository
+            file_paths: Comma-separated list of file paths (e.g., "README.md,src/main.py" or "backend/README.md")
             branch: Optional branch name (default: None)
     """
     url = f"https://github.com/{owner}/{repo}"
+
+    # Parse comma-separated file paths into a list
+    if not file_paths or not file_paths.strip():
+        return {
+            "error": "No file paths provided. Please specify at least one file path (e.g., 'backend/README.md' or 'README.md,src/main.py')."
+        }
+
+    # Split by comma and clean up whitespace
+    file_paths_list = [path.strip() for path in file_paths.split(",") if path.strip()]
+
+    if not file_paths_list:
+        return {
+            "error": "No valid file paths found. Please specify at least one file path (e.g., 'backend/README.md' or 'README.md,src/main.py')."
+        }
 
     try:
         ingester = GitIngester(url, branch=branch)
         await ingester.fetch_repo_data()
 
         if hasattr(ingester, "_tree_data") and ingester.github_token:
-            files_content = await ingester._get_files_content_async(file_paths)
+            files_content = await ingester._get_files_content_async(file_paths_list)
         else:
-            files_content = ingester.get_content(file_paths)
+            files_content = ingester.get_content(file_paths_list)
 
-        if not files_content:
+        # Check if any actual file content was found (not just error messages)
+        if (
+            not files_content
+            or "File not found" in files_content
+            or "[File not found" in files_content
+        ):
             return {
                 "error": f"None of the requested files were found in the repository"
             }
@@ -105,6 +125,7 @@ async def git_files(
         return {
             "error": f"Failed to get file content: {str(e)}. Try https://gitingest.com/{url} instead"
         }
+
 
 def main():
     """Entry point for the gitingest-mcp command."""
